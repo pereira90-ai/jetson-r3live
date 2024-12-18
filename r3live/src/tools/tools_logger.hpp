@@ -61,26 +61,6 @@ Dr. Fu Zhang < fuzhang@hku.hk >.
 #include <iomanip>
 #include "tools_color_printf.hpp"
 #include "tools_timer.hpp"
-// #define FILE_LOGGER_VERSION      "V1.0"
-// #define FILE_LOGGER_VERSION_INFO "First version"
-
-//#define FILE_LOGGER_VERSION "V1.1"
-//#define FILE_LOGGER_VERSION_INFO "Add macro, make logger more easy to call"
-
-//#define FILE_LOGGER_VERSION "V1.2"
-//#define FILE_LOGGER_VERSION_INFO "Compatible with windows."
-
-//#define FILE_LOGGER_VERSION "V1.3"
-//#define FILE_LOGGER_VERSION_INFO "Support verbose"
-
-// #define FILE_LOGGER_VERSION "V1.4"
-// #define FILE_LOGGER_VERSION_INFO "Add macro code block, enable turn off the printf quickly"
-
-// #define FILE_LOGGER_VERSION "V1.5"
-// #define FILE_LOGGER_VERSION_INFO "Add variable restore block, enable turn off/on screen prinf in local block scope."
-
-// #define FILE_LOGGER_VERSION "V1.6"
-// #define FILE_LOGGER_VERSION_INFO "Fix discontruction bugs."
 
 #define FILE_LOGGER_VERSION "V1.7"
 #define FILE_LOGGER_VERSION_INFO "Add more tools, print out the hardware information in printf_program."

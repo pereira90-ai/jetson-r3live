@@ -1296,109 +1296,83 @@ inline String get_current_folder()
     return ensureUnifySlash( dir );
 }
 
-#ifdef _MSC_VER
-#include <intrin.h>
-inline void CPUID( int CPUInfo[ 4 ], int level ) { __cpuid( CPUInfo, level ); }
-#else
+#ifdef __x86_64__
 #include <cpuid.h>
-inline void CPUID( int CPUInfo[ 4 ], int level )
-{
-    unsigned *p( ( unsigned * ) CPUInfo );
-    __get_cpuid( ( unsigned & ) level, p + 0, p + 1, p + 2, p + 3 );
-}
 #endif
 
-inline CPUINFO GetCPUInfo_()
+// On ARM, we won't use cpuid. We'll provide a fallback.
+inline String get_cpu_info()
 {
-    CPUINFO info;
+#ifdef __x86_64__
+    // x86-specific CPU info retrieval
+    // Using cpuid as in original code.
+    struct CPUINFO_TYP
+    {
+        bool bSSE;
+        bool bSSE2;
+        bool bSSE3;
+        bool bSSE41;
+        bool bSSE42;
+        bool bAVX;
+        bool bFMA;
+        bool b3DNOW;
+        bool b3DNOWEX;
+        bool bMMX;
+        bool bMMXEX;
+        bool bEXT;
+        char vendor[13];
+        char name[49];
+    } info;
 
-    // set all values to 0 (false)
-    memset( &info, 0, sizeof( CPUINFO ) );
+    memset( &info, 0, sizeof( info ) );
 
-    int CPUInfo[ 4 ];
-
-    // CPUID with an InfoType argument of 0 returns the number of
-    // valid Ids in CPUInfo[0] and the CPU identification string in
-    // the other three array elements. The CPU identification string is
-    // not in linear order. The code below arranges the information
-    // in a human readable form.
-    CPUID( CPUInfo, 0 );
+    int CPUInfo[4];
+    __get_cpuid(0,(unsigned int*)&CPUInfo[0],(unsigned int*)&CPUInfo[1],(unsigned int*)&CPUInfo[2],(unsigned int*)&CPUInfo[3]);
     *( ( int * ) info.vendor ) = CPUInfo[ 1 ];
     *( ( int * ) ( info.vendor + 4 ) ) = CPUInfo[ 3 ];
     *( ( int * ) ( info.vendor + 8 ) ) = CPUInfo[ 2 ];
 
-    // Interpret CPU feature information.
-    CPUID( CPUInfo, 1 );
-    info.bMMX = ( CPUInfo[ 3 ] & 0x800000 ) != 0;            // test bit 23 for MMX
-    info.bSSE = ( CPUInfo[ 3 ] & 0x2000000 ) != 0;           // test bit 25 for SSE
-    info.bSSE2 = ( CPUInfo[ 3 ] & 0x4000000 ) != 0;          // test bit 26 for SSE2
-    info.bSSE3 = ( CPUInfo[ 2 ] & 0x1 ) != 0;                // test bit 0 for SSE3
-    info.bSSE41 = ( CPUInfo[ 2 ] & 0x80000 ) != 0;           // test bit 19 for SSE4.1
-    info.bSSE42 = ( CPUInfo[ 2 ] & 0x100000 ) != 0;          // test bit 20 for SSE4.2
-    info.bAVX = ( CPUInfo[ 2 ] & 0x18000000 ) == 0x18000000; // test bits 28,27 for AVX
-    info.bFMA = ( CPUInfo[ 2 ] & 0x18001000 ) == 0x18001000; // test bits 28,27,12 for FMA
+    __get_cpuid(1,(unsigned int*)&CPUInfo[0],(unsigned int*)&CPUInfo[1],(unsigned int*)&CPUInfo[2],(unsigned int*)&CPUInfo[3]);
+    info.bMMX   = ( CPUInfo[ 3 ] & 0x00800000 ) != 0;
+    info.bSSE   = ( CPUInfo[ 3 ] & 0x02000000 ) != 0;
+    info.bSSE2  = ( CPUInfo[ 3 ] & 0x04000000 ) != 0;
+    info.bSSE3  = ( CPUInfo[ 2 ] & 0x00000001 ) != 0;
+    info.bSSE41 = ( CPUInfo[ 2 ] & 0x00080000 ) != 0;
+    info.bSSE42 = ( CPUInfo[ 2 ] & 0x00100000 ) != 0;
+    info.bAVX   = ( CPUInfo[ 2 ] & 0x10000000 ) != 0;
+    info.bFMA   = ( CPUInfo[ 2 ] & 0x00001000 ) != 0;
 
-    // EAX=0x80000000 => CPUID returns extended features
-    CPUID( CPUInfo, 0x80000000 );
-    const unsigned nExIds = CPUInfo[ 0 ];
-    info.bEXT = ( nExIds >= 0x80000000 );
+    __get_cpuid(0x80000000,(unsigned int*)&CPUInfo[0],(unsigned int*)&CPUInfo[1],(unsigned int*)&CPUInfo[2],(unsigned int*)&CPUInfo[3]);
+    unsigned nExIds = CPUInfo[0];
+    info.bEXT = (nExIds >= 0x80000000);
 
-    // must be greater than 0x80000004 to support CPU name
     if ( nExIds > 0x80000004 )
     {
-        size_t idx( 0 );
-        CPUID( CPUInfo, 0x80000002 ); // CPUID returns CPU name part1
-        while ( ( ( uint8_t * ) CPUInfo )[ idx ] == ' ' )
-            ++idx;
-        memcpy( info.name, ( uint8_t * ) CPUInfo + idx, sizeof( CPUInfo ) - idx );
-        idx = sizeof( CPUInfo ) - idx;
-
-        CPUID( CPUInfo, 0x80000003 ); // CPUID returns CPU name part2
-        memcpy( info.name + idx, CPUInfo, sizeof( CPUInfo ) );
-        idx += 16;
-
-        CPUID( CPUInfo, 0x80000004 ); // CPUID returns CPU name part3
-        memcpy( info.name + idx, CPUInfo, sizeof( CPUInfo ) );
+        // Get CPU brand string
+        __get_cpuid(0x80000002,(unsigned int*)&CPUInfo[0],(unsigned int*)&CPUInfo[1],(unsigned int*)&CPUInfo[2],(unsigned int*)&CPUInfo[3]);
+        memcpy(info.name, CPUInfo, sizeof(CPUInfo));
+        __get_cpuid(0x80000003,(unsigned int*)&CPUInfo[0],(unsigned int*)&CPUInfo[1],(unsigned int*)&CPUInfo[2],(unsigned int*)&CPUInfo[3]);
+        memcpy(info.name+16, CPUInfo, sizeof(CPUInfo));
+        __get_cpuid(0x80000004,(unsigned int*)&CPUInfo[0],(unsigned int*)&CPUInfo[1],(unsigned int*)&CPUInfo[2],(unsigned int*)&CPUInfo[3]);
+        memcpy(info.name+32, CPUInfo, sizeof(CPUInfo));
     }
 
-    if ( ( strncmp( info.vendor, "AuthenticAMD", 12 ) == 0 ) && info.bEXT )
-    {                                                       // AMD
-        CPUID( CPUInfo, 0x80000001 );                       // CPUID will copy ext. feat. bits to EDX and cpu type to EAX
-        info.b3DNOWEX = ( CPUInfo[ 3 ] & 0x40000000 ) != 0; // indicates AMD extended 3DNow+!
-        info.bMMXEX = ( CPUInfo[ 3 ] & 0x400000 ) != 0;     // indicates AMD extended MMX
-    }
-
-    return info;
-}
-
-#if 1
-inline String get_cpu_info()
-{
-    const CPUINFO info( GetCPUInfo_() );
-    String        cpu( info.name[ 0 ] == 0 ? info.vendor : info.name );
-#if 0
-	if (info.bFMA)
-		cpu += _T(" FMA");
-	else if (info.bAVX)
-		cpu += _T(" AVX");
-	else if (info.bSSE42)
-		cpu += _T(" SSE4.2");
-	else if (info.bSSE41)
-		cpu += _T(" SSE4.1");
-	else if (info.bSSE3)
-		cpu += _T(" SSE3");
-	else if (info.bSSE2)
-		cpu += _T(" SSE2");
-	else if (info.bSSE)
-		cpu += _T(" SSE");
-	if (info.b3DNOWEX)
-		cpu += _T(" 3DNOWEX");
-	else if (info.b3DNOW)
-		cpu += _T(" 3DNOW");
-#endif
+    String cpu( info.name[0] == 0 ? info.vendor : info.name );
     return cpu;
-}
+
+#else
+    // ARM fallback: Just return something generic or use uname
+    struct utsname n;
+    if ( uname( &n ) != 0 )
+        return "ARM CPU (unknown)";
+
+    // On Jetson, uname gives something like "aarch64"
+    String cpu_info = String(n.machine);
+    // You could also parse /proc/cpuinfo if needed.
+    return "ARM CPU: " + cpu_info;
 #endif
+}
+
 /*----------------------------------------------------------------*/
 
 inline String get_RAM_info()

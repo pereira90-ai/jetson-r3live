@@ -472,7 +472,9 @@ Flags InitCPU()
 }
 /*----------------------------------------------------------------*/
 
+/*----------------------------------------------------------------*/
 
+#ifdef __x86_64__
 #ifdef _MSC_VER
 #include <intrin.h>
 inline void CPUID(int CPUInfo[4], int level) {
@@ -482,7 +484,13 @@ inline void CPUID(int CPUInfo[4], int level) {
 #include <cpuid.h>
 inline void CPUID(int CPUInfo[4], int level) {
 	unsigned* p((unsigned*)CPUInfo);
-	__get_cpuid((unsigned&)level, p+0, p+1, p+2, p+3);
+	__get_cpuid((unsigned)level, p+0, p+1, p+2, p+3);
+}
+#endif
+#else
+// Non-x86 fallback
+inline void CPUID(int CPUInfo[4], int /*level*/) {
+	CPUInfo[0] = CPUInfo[1] = CPUInfo[2] = CPUInfo[3] = 0;
 }
 #endif
 
@@ -492,140 +500,151 @@ inline void CPUID(int CPUInfo[4], int level) {
 CPUINFO GetCPUInfo()
 {
 	CPUINFO info;
-
-	// set all values to 0 (false)
 	memset(&info, 0, sizeof(CPUINFO));
 
-	int CPUInfo[4];
+#ifdef __x86_64__
+	int CPUData[4];
 
-	// CPUID with an InfoType argument of 0 returns the number of
-	// valid Ids in CPUInfo[0] and the CPU identification string in
-	// the other three array elements. The CPU identification string is
-	// not in linear order. The code below arranges the information
-	// in a human readable form.
-	CPUID(CPUInfo, 0);
-	*((int*)info.vendor) = CPUInfo[1];
-	*((int*)(info.vendor+4)) = CPUInfo[3];
-	*((int*)(info.vendor+8)) = CPUInfo[2];
+	CPUID(CPUData, 0);
+	*((int*)info.vendor) = CPUData[1];
+	*((int*)(info.vendor+4)) = CPUData[3];
+	*((int*)(info.vendor+8)) = CPUData[2];
+	info.vendor[12] = '\0';
 
-	// Interpret CPU feature information.
-	CPUID(CPUInfo, 1);
-	info.bMMX = (CPUInfo[3] & 0x800000) != 0; // test bit 23 for MMX
-	info.bSSE = (CPUInfo[3] & 0x2000000) != 0; // test bit 25 for SSE
-	info.bSSE2 = (CPUInfo[3] & 0x4000000) != 0; // test bit 26 for SSE2
-	info.bSSE3 = (CPUInfo[2] & 0x1) != 0; // test bit 0 for SSE3
-	info.bSSE41 = (CPUInfo[2] & 0x80000) != 0; // test bit 19 for SSE4.1
-	info.bSSE42 = (CPUInfo[2] & 0x100000) != 0; // test bit 20 for SSE4.2
-	info.bAVX = (CPUInfo[2] & 0x18000000) == 0x18000000; // test bits 28,27 for AVX
-	info.bFMA = (CPUInfo[2] & 0x18001000) == 0x18001000; // test bits 28,27,12 for FMA
+	CPUID(CPUData, 1);
+	info.bMMX = (CPUData[3] & 0x800000) != 0;
+	info.bSSE = (CPUData[3] & 0x2000000) != 0;
+	info.bSSE2 = (CPUData[3] & 0x4000000) != 0;
+	info.bSSE3 = (CPUData[2] & 0x1) != 0;
+	info.bSSE41 = (CPUData[2] & 0x80000) != 0;
+	info.bSSE42 = (CPUData[2] & 0x100000) != 0;
+	info.bAVX = (CPUData[2] & 0x18000000) == 0x18000000;
+	info.bFMA = (CPUData[2] & 0x18001000) == 0x18001000;
 
-	// EAX=0x80000000 => CPUID returns extended features
-	CPUID(CPUInfo, 0x80000000);
-	const unsigned nExIds = CPUInfo[0];
+	CPUID(CPUData, 0x80000000);
+	const unsigned nExIds = (unsigned)CPUData[0];
 	info.bEXT = (nExIds >= 0x80000000);
 
-	// must be greater than 0x80000004 to support CPU name
 	if (nExIds > 0x80000004) {
 		size_t idx(0);
-		CPUID(CPUInfo, 0x80000002); // CPUID returns CPU name part1
-		while (((uint8_t*)CPUInfo)[idx] == ' ')
+		CPUID(CPUData, 0x80000002);
+		while (((uint8_t*)CPUData)[idx] == ' ')
 			++idx;
-		memcpy(info.name, (uint8_t*)CPUInfo + idx, sizeof(CPUInfo) - idx);
-		idx = sizeof(CPUInfo) - idx;
+		memcpy(info.name, (uint8_t*)CPUData + idx, sizeof(CPUData)-idx);
+		idx = sizeof(CPUData)-idx;
 
-		CPUID(CPUInfo, 0x80000003); // CPUID returns CPU name part2
-		memcpy(info.name+idx, CPUInfo, sizeof(CPUInfo));
+		CPUID(CPUData, 0x80000003);
+		memcpy(info.name+idx, CPUData, sizeof(CPUData));
 		idx += 16;
 
-		CPUID(CPUInfo, 0x80000004); // CPUID returns CPU name part3
-		memcpy(info.name+idx, CPUInfo, sizeof(CPUInfo));
+		CPUID(CPUData, 0x80000004);
+		memcpy(info.name+idx, CPUData, sizeof(CPUData));
+	} else {
+		// Just copy vendor to name if no extended name
+		strncpy(info.name, info.vendor, sizeof(info.name)-1);
+		info.name[sizeof(info.name)-1] = '\0';
 	}
 
-	if ((strncmp(info.vendor, "AuthenticAMD", 12)==0) && info.bEXT) {  // AMD
-		CPUID(CPUInfo, 0x80000001); // CPUID will copy ext. feat. bits to EDX and cpu type to EAX
-		info.b3DNOWEX = (CPUInfo[3] & 0x40000000) != 0;	// indicates AMD extended 3DNow+!
-		info.bMMXEX = (CPUInfo[3] & 0x400000) != 0; // indicates AMD extended MMX
+	if ((strncmp(info.vendor, "AuthenticAMD", 12)==0) && info.bEXT) {
+		CPUID(CPUData, 0x80000001);
+		info.b3DNOWEX = (CPUData[3] & 0x40000000) != 0;
+		info.bMMXEX = (CPUData[3] & 0x400000) != 0;
 	}
+#else
+	// Non-x86 fallback
+	// Use uname to get CPU info
+	struct utsname n;
+	if (uname(&n) == 0) {
+		strncpy(info.vendor, n.machine, sizeof(info.vendor)-1);
+		info.vendor[sizeof(info.vendor)-1] = '\0';
+		strncpy(info.name, n.machine, sizeof(info.name)-1);
+		info.name[sizeof(info.name)-1] = '\0';
+	} else {
+		strncpy(info.vendor, "Generic-ARM", sizeof(info.vendor)-1);
+		info.vendor[sizeof(info.vendor)-1] = '\0';
+		strncpy(info.name, "Generic ARM CPU", sizeof(info.name)-1);
+		info.name[sizeof(info.name)-1] = '\0';
+	}
+#endif
 
 	return info;
 }
 /*----------------------------------------------------------------*/
 
+#ifdef __x86_64__
+
 #ifdef _MSC_VER
-// Function to detect SSE availability in operating system.
 bool OSSupportsSSE()
 {
-	#ifndef _WIN64
-	// try SSE instruction and look for crash
-	__try
-	{
+#ifndef _WIN64
+	__try {
 		_asm xorps xmm0, xmm0
 	}
 	__except(EXCEPTION_EXECUTE_HANDLER) {
 		if (_exception_code() == STATUS_ILLEGAL_INSTRUCTION)
-			return false; // sse not supported by os
-		return false;     // unknown exception occurred
+			return false;
+		return false;
 	}
-	#endif // _WIN64
-
+#endif
 	return true;
 }
-// Function to detect AVX availability in operating system.
+
 bool OSSupportsAVX()
 {
-	#ifndef _WIN64
-	// try AVX instruction
+#ifndef _WIN64
+	// For 32-bit Windows, inline assembly checks
 	unsigned flag;
-	_asm {
-		mov ecx, 0; //specify 0 for XFEATURE_ENABLED_MASK register
-		XGETBV; //result in EDX:EAX
+	__asm {
+		mov ecx, 0; // XFEATURE_ENABLED_MASK register
+		XGETBV; // result in EDX:EAX
+		// check if both XMM and YMM states are enabled by OS
 		and eax, 06H;
-		cmp eax, 06H; // check OS has enabled both XMM and YMM state support
+		cmp eax, 06H;
 		jne not_supported
-		mov eax, 1; // mark as supported
+		mov eax, 1
 		jmp done
 		not_supported:
-		mov eax, 0; // mark as not supported
+		mov eax, 0
 		done:
 		mov esi, flag
 		mov [esi], eax
 	}
 	return flag != 0;
-	#else
-	// check if the OS will save the YMM registers
+#else
 	unsigned long long xcrFeatureMask(_xgetbv(_XCR_XFEATURE_ENABLED_MASK));
 	return (xcrFeatureMask & 0x6) == 0x6;
-	#endif // _WIN64
+#endif
 }
-/*----------------------------------------------------------------*/
-
-#else // _MSC_VER
-
-// Function to detect SSE availability in operating system.
+#else // non-MSVC (GCC/Clang on x86)
 bool OSSupportsSSE()
 {
-	// try SSE instruction and look for crash
 	try {
 		asm("xorps %xmm0, %xmm0");
-	}
-	catch(int e) {
-		return false;     // unknown exception occurred
+	} catch(...) {
+		return false;
 	}
 	return true;
 }
-// Function to detect AVX availability in operating system.
+
 bool OSSupportsAVX()
 {
-	// check if the OS will save the YMM registers
-	unsigned int index(0); //specify 0 for XFEATURE_ENABLED_MASK register
+	unsigned int index(0); 
 	unsigned int eax, edx;
 	__asm__ __volatile__("xgetbv" : "=a"(eax), "=d"(edx) : "c"(index));
 	unsigned long long xcrFeatureMask(((unsigned long long)edx << 32) | eax);
 	return (xcrFeatureMask & 0x6) == 0x6;
 }
-/*----------------------------------------------------------------*/
 #endif // _MSC_VER
 
+#else // __x86_64__ not defined (ARM, etc.)
+bool OSSupportsSSE() {
+	return false;
+}
+bool OSSupportsAVX() {
+	return false;
+}
+#endif
+/*----------------------------------------------------------------*/
 
 // print details about the current build and PC
 void Util::LogBuild()

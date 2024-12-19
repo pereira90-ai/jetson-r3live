@@ -988,6 +988,7 @@ inline String get_current_folder()
 #include <intrin.h>
 inline void CPUID( int CPUInfo[ 4 ], int level ) { __cpuid( CPUInfo, level ); }
 #else
+
 #include <cpuid.h>
 inline void CPUID( int CPUInfo[ 4 ], int level )
 {
